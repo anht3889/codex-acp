@@ -15,6 +15,9 @@ use tracing_subscriber::EnvFilter;
 mod codex_agent;
 mod thread;
 
+const MCP_OAUTH_CREDENTIALS_STORE_KEY: &str = "mcp_oauth_credentials_store";
+const MCP_OAUTH_CREDENTIALS_STORE_FILE: &str = "file";
+
 /// Run the Codex ACP agent.
 ///
 /// This sets up an ACP agent that communicates over stdio, bridging
@@ -41,6 +44,7 @@ pub async fn run_main(
             format!("error parsing -c overrides: {e}"),
         )
     })?;
+    let cli_kv_overrides = with_acp_default_cli_overrides(cli_kv_overrides);
 
     let config_overrides = ConfigOverrides {
         codex_linux_sandbox_exe: codex_linux_sandbox_exe.clone(),
@@ -93,8 +97,52 @@ fn config_load_error(error: impl std::fmt::Display) -> std::io::Error {
     )
 }
 
+fn with_acp_default_cli_overrides(
+    mut cli_kv_overrides: Vec<(String, TomlValue)>,
+) -> Vec<(String, TomlValue)> {
+    if !cli_kv_overrides
+        .iter()
+        .any(|(key, _)| key == MCP_OAUTH_CREDENTIALS_STORE_KEY)
+    {
+        cli_kv_overrides.push((
+            MCP_OAUTH_CREDENTIALS_STORE_KEY.to_string(),
+            TomlValue::String(MCP_OAUTH_CREDENTIALS_STORE_FILE.to_string()),
+        ));
+    }
+    cli_kv_overrides
+}
+
 // Re-export the MCP server types for compatibility
 pub use codex_mcp_server::{
     CodexToolCallParam, CodexToolCallReplyParam, ExecApprovalElicitRequestParams,
     ExecApprovalResponse, PatchApprovalElicitRequestParams, PatchApprovalResponse,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acp_defaults_mcp_oauth_credentials_to_file() {
+        let overrides = with_acp_default_cli_overrides(Vec::new());
+
+        assert_eq!(
+            overrides,
+            vec![(
+                MCP_OAUTH_CREDENTIALS_STORE_KEY.to_string(),
+                TomlValue::String(MCP_OAUTH_CREDENTIALS_STORE_FILE.to_string()),
+            )]
+        );
+    }
+
+    #[test]
+    fn acp_default_does_not_override_explicit_mcp_oauth_credentials_store() {
+        let explicit_override = (
+            MCP_OAUTH_CREDENTIALS_STORE_KEY.to_string(),
+            TomlValue::String("keyring".to_string()),
+        );
+        let overrides = with_acp_default_cli_overrides(vec![explicit_override.clone()]);
+
+        assert_eq!(overrides, vec![explicit_override]);
+    }
+}
